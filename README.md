@@ -1,5 +1,6 @@
-# Overview
 [![GoDoc](https://godoc.org/github.com/robertoesteves13/qfl?status.png)](https://godoc.org/github.com/robertoesteves13/qfl)
+# Overview
+
 This repository contains a parser for the QFL language that transforms into
 a filter data structure that stores a collection of rules for a given record,
 which the user can apply filters for searching for any database.

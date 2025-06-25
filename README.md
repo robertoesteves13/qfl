@@ -28,10 +28,10 @@ filter|filter
 - is: Comma-separated list of possible options (similar to `IN ("a", "b")` in SQL)
 
 ## Symbols
-| (bar): combine filters from both sides
-, (comma): Separate elements in a list
-! (mark): Indicate start of a value
-\ (backslash): escape the character in front of it (only affects symbols)
+- | (bar): combine filters from both sides
+- , (comma): Separate elements in a list
+- ! (mark): Indicate start of a value
+- \ (backslash): escape the character in front of it (only affects symbols)
 
 # Contributing
 

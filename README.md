@@ -1,7 +1,11 @@
 # Overview
+[![GoDoc](https://godoc.org/github.com/robertoesteves13/qfl?status.png)](https://godoc.org/github.com/robertoesteves13/qfl)
 This repository contains a parser for the QFL language that transforms into
 a filter data structure that stores a collection of rules for a given record,
 which the user can apply filters for searching for any database.
+
+# Library
+Checkout [documentation](https://pkg.go.dev/github.com/robertoesteves13/qfl) for examples on how to use the library.
 
 # Language
 QFL is a simple filtering language for queries designed to have just enough
@@ -26,7 +30,6 @@ You can combine more than one filter by using the bar:
 ```
 filter|filter
 ```
-
 
 ## Comparators
 - eq: Equals

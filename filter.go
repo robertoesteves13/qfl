@@ -4,16 +4,12 @@ import (
 	"time"
 )
 
-type RuleType uint8
+// Primitive is a generic interface that indicates the types the filter can store.
+type Primitive interface {
+	int | uint | float64 | string | time.Time
+}
 
-const (
-	RuleTypeInt RuleType = iota
-	RuleTypeUint
-	RuleTypeFloat
-	RuleTypeString
-	RuleTypeTime
-)
-
+// ComparasionType indicates the comparasion it should make for the values.
 type ComparasionType uint8
 
 const (
@@ -24,10 +20,30 @@ const (
 	ComparasionLessOrEqual
 	ComparasionMoreOrEqual
 	ComparasionLike
-	ComparasionIs
 )
 
-type FilterRule[T comparable] struct {
+func (c ComparasionType) String() string {
+	switch c {
+	case ComparasionEquals:
+		return "Equals"
+	case ComparasionLessOrEqual:
+		return "LessOrEqual"
+	case ComparasionLessThan:
+		return "LessThan"
+	case ComparasionLike:
+		return "Like"
+	case ComparasionMoreOrEqual:
+		return "MoreOrEqual"
+	case ComparasionMoreThan:
+		return "MoreThan"
+	default:
+		return "Invalid"
+	}
+}
+
+// FilterRule represents
+// Note that `ComparasionEquals` is the only one that can have more than one value.
+type FilterRule[T Primitive] struct {
 	Comparasion ComparasionType
 	Values      []T
 }
@@ -35,7 +51,7 @@ type FilterRule[T comparable] struct {
 // Filter is a specialized data structure that stores rules for a given key. It
 // only supports some primitive data types. All get and set functions should be
 // the exactly same except for the type it's manipulating, this is on purporse
-// to avoid casting costs and type safety.
+// to ensure type safety.
 type Filter struct {
 	keys []filterKey
 
@@ -48,7 +64,7 @@ type Filter struct {
 
 func (f *Filter) GetInt(key string) []FilterRule[int] {
 	for i := range f.keys {
-		if f.keys[i].key == key && f.keys[i].Type == RuleTypeInt {
+		if f.keys[i].key == key && f.keys[i].Type == ruleTypeInt {
 			return getGeneric(f.keys[i], f.intVals)
 		}
 	}
@@ -58,7 +74,7 @@ func (f *Filter) GetInt(key string) []FilterRule[int] {
 
 func (f *Filter) GetUint(key string) []FilterRule[uint] {
 	for i := range f.keys {
-		if f.keys[i].key == key && f.keys[i].Type == RuleTypeUint {
+		if f.keys[i].key == key && f.keys[i].Type == ruleTypeUint {
 			return getGeneric(f.keys[i], f.uintVals)
 		}
 	}
@@ -68,7 +84,7 @@ func (f *Filter) GetUint(key string) []FilterRule[uint] {
 
 func (f *Filter) GetFloat(key string) []FilterRule[float64] {
 	for i := range f.keys {
-		if f.keys[i].key == key && f.keys[i].Type == RuleTypeFloat {
+		if f.keys[i].key == key && f.keys[i].Type == ruleTypeFloat {
 			return getGeneric(f.keys[i], f.floatVals)
 		}
 	}
@@ -78,7 +94,7 @@ func (f *Filter) GetFloat(key string) []FilterRule[float64] {
 
 func (f *Filter) GetString(key string) []FilterRule[string] {
 	for i := range f.keys {
-		if f.keys[i].key == key && f.keys[i].Type == RuleTypeString {
+		if f.keys[i].key == key && f.keys[i].Type == ruleTypeString {
 			return getGeneric(f.keys[i], f.stringVals)
 		}
 	}
@@ -88,7 +104,7 @@ func (f *Filter) GetString(key string) []FilterRule[string] {
 
 func (f *Filter) GetTime(key string) []FilterRule[time.Time] {
 	for i := range f.keys {
-		if f.keys[i].key == key && f.keys[i].Type == RuleTypeTime {
+		if f.keys[i].key == key && f.keys[i].Type == ruleTypeTime {
 			return getGeneric(f.keys[i], f.timeVals)
 		}
 	}
@@ -96,7 +112,7 @@ func (f *Filter) GetTime(key string) []FilterRule[time.Time] {
 	return nil
 }
 
-func getGeneric[T comparable](key filterKey, vals []T) []FilterRule[T] {
+func getGeneric[T Primitive](key filterKey, vals []T) []FilterRule[T] {
 	rules := key.rules
 	rulesReturn := make([]FilterRule[T], len(rules))
 
@@ -123,7 +139,7 @@ func (f *Filter) AddInt(key string, values []int, comparasion ComparasionType) {
 	end := len(f.intVals)
 
 	indices := generateSequence(start, end)
-	f.appendRule(key, indices, comparasion, RuleTypeInt)
+	f.appendRule(key, indices, comparasion, ruleTypeInt)
 }
 
 func (f *Filter) AddUint(key string, values []uint, comparasion ComparasionType) {
@@ -132,7 +148,7 @@ func (f *Filter) AddUint(key string, values []uint, comparasion ComparasionType)
 	end := len(f.uintVals)
 
 	indices := generateSequence(start, end)
-	f.appendRule(key, indices, comparasion, RuleTypeUint)
+	f.appendRule(key, indices, comparasion, ruleTypeUint)
 }
 
 func (f *Filter) AddFloat(key string, values []float64, comparasion ComparasionType) {
@@ -141,7 +157,7 @@ func (f *Filter) AddFloat(key string, values []float64, comparasion ComparasionT
 	end := len(f.floatVals)
 
 	indices := generateSequence(start, end)
-	f.appendRule(key, indices, comparasion, RuleTypeFloat)
+	f.appendRule(key, indices, comparasion, ruleTypeFloat)
 }
 
 func (f *Filter) AddString(key string, values []string, comparasion ComparasionType) {
@@ -150,7 +166,7 @@ func (f *Filter) AddString(key string, values []string, comparasion ComparasionT
 	end := len(f.stringVals)
 
 	indices := generateSequence(start, end)
-	f.appendRule(key, indices, comparasion, RuleTypeString)
+	f.appendRule(key, indices, comparasion, ruleTypeString)
 }
 
 func (f *Filter) AddTime(key string, values []time.Time, comparasion ComparasionType) {
@@ -159,10 +175,10 @@ func (f *Filter) AddTime(key string, values []time.Time, comparasion Comparasion
 	end := len(f.timeVals)
 
 	indices := generateSequence(start, end)
-	f.appendRule(key, indices, comparasion, RuleTypeTime)
+	f.appendRule(key, indices, comparasion, ruleTypeTime)
 }
 
-func (f *Filter) appendRule(key string, indices []int, comparasion ComparasionType, ruleType RuleType) {
+func (f *Filter) appendRule(key string, indices []int, comparasion ComparasionType, ruleType ruleType) {
 	rule := filterRule{
 		Comparasion: comparasion,
 		indices:     indices,
@@ -185,7 +201,7 @@ func (f *Filter) appendRule(key string, indices []int, comparasion ComparasionTy
 
 type filterKey struct {
 	key   string
-	Type  RuleType
+	Type  ruleType
 	rules []filterRule
 }
 
@@ -193,3 +209,13 @@ type filterRule struct {
 	Comparasion ComparasionType
 	indices     []int
 }
+
+type ruleType uint8
+
+const (
+	ruleTypeInt ruleType = iota
+	ruleTypeUint
+	ruleTypeFloat
+	ruleTypeString
+	ruleTypeTime
+)

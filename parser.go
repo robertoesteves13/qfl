@@ -7,91 +7,90 @@ import (
 	"time"
 )
 
-// FilterParser parses key/value data like url.Values to support (not quite) complex
-// query types. It stores the keys and types that will be looked and parsed in its
-// simple filtering type, for example: `x=ge!3|lt!5` will filter for any x that
-// satisfies x >= x < 5
-//
-// Comparators:
-// - [eq]: Equals
-// - lt: Less than
-// - gt: Greater than
-// - le: Less or equal
-// - ge: Greater or equal
-// - like: Searches for similar string
-// - is: Comma-separated list of possible options (similar to `IN ("a", "b")` in SQL)
-//
-// Symbols:
-// | (bar): Apply more than one filter with AND
-// , (comma): Separate elements in a list
-// ! (mark): Indicate start of a value
-// \ (backslash): escape the character in front of it (only affects symbols)
-type FilterParser struct {
-	keys  []string
-	types []RuleType
+// Parser parses the QFL language for the keys you specify
+type Parser struct {
+	TimeFormat string // defaults to RCF3339 if empty
+	keys       []string
+	types      []ruleType
 }
 
-func (p *FilterParser) AddInt(key string) {
+func (p *Parser) AddInt(key string) {
 	p.keys = append(p.keys, key)
-	p.types = append(p.types, RuleTypeInt)
+	p.types = append(p.types, ruleTypeInt)
 }
 
-func (p *FilterParser) AddUint(key string) {
+func (p *Parser) AddUint(key string) {
 	p.keys = append(p.keys, key)
-	p.types = append(p.types, RuleTypeUint)
+	p.types = append(p.types, ruleTypeUint)
 }
 
-func (p *FilterParser) AddFloat(key string) {
+func (p *Parser) AddFloat(key string) {
 	p.keys = append(p.keys, key)
-	p.types = append(p.types, RuleTypeFloat)
+	p.types = append(p.types, ruleTypeFloat)
 }
 
-func (p *FilterParser) AddString(key string) {
+func (p *Parser) AddString(key string) {
 	p.keys = append(p.keys, key)
-	p.types = append(p.types, RuleTypeString)
+	p.types = append(p.types, ruleTypeString)
 }
 
-func (p *FilterParser) AddTime(key string) {
+func (p *Parser) AddTime(key string) {
 	p.keys = append(p.keys, key)
-	p.types = append(p.types, RuleTypeTime)
+	p.types = append(p.types, ruleTypeTime)
 }
 
-func (p FilterParser) ParseURL(u *url.URL) (*Filter, error) {
+// ParseURL reads query variables and returns the filter containing all rules
+// for them. Note that it only looks for the first definition of the variable.
+func (p Parser) ParseURL(u *url.URL) (*Filter, error) {
 	vals := u.Query()
+	kv := make(map[string]string)
+	for k, v := range vals {
+		kv[k] = v[0]
+	}
+
+	return p.Parse(kv)
+}
+
+func (p Parser) Parse(kv map[string]string) (*Filter, error) {
+	// Ensure that time format is set before running the parser
+	if p.TimeFormat == "" {
+		p.TimeFormat = time.RFC3339
+	}
+
 	fm := &Filter{}
 	for i := range p.keys {
-		if !vals.Has(p.keys[i]) {
+		if _, ok := kv[p.keys[i]]; !ok {
 			continue
 		}
 
-		tokens := p.tokenize(vals.Get(p.keys[i]))
+		tokens := p.tokenize(kv[p.keys[i]])
 		if len(tokens) == 1 {
 			switch p.types[i] {
-			case RuleTypeFloat:
+			case ruleTypeFloat:
 				val, err := strconv.ParseFloat(tokens[0].Value, 64)
 				if err != nil {
 					return nil, fmt.Errorf("value `%s` is an invalid float", tokens[0].Value)
 				}
 				fm.AddFloat(p.keys[i], []float64{val}, ComparasionEquals)
 
-			case RuleTypeInt:
+			case ruleTypeInt:
 				val, err := strconv.ParseInt(tokens[0].Value, 10, 0)
 				if err != nil {
 					return nil, fmt.Errorf("value `%s` is an invalid int", tokens[0].Value)
 				}
 				fm.AddInt(p.keys[i], []int{int(val)}, ComparasionEquals)
 
-			case RuleTypeString:
+			case ruleTypeString:
 				fm.AddString(p.keys[i], []string{tokens[0].Value}, ComparasionEquals)
 
-			case RuleTypeTime:
-				t, err := time.Parse(time.RFC3339, tokens[0].Value)
+			case ruleTypeTime:
+				t, err := time.Parse(p.TimeFormat, tokens[0].Value)
 				if err != nil {
-					return nil, fmt.Errorf("value `%s` is an invalid RFC3339 time", tokens[0].Value)
+					return nil, fmt.Errorf("value `%s` is not a time formatted as `%s`", tokens[0].Value, p.TimeFormat)
 				}
 				fm.AddTime(p.keys[i], []time.Time{t}, ComparasionEquals)
 
-			case RuleTypeUint:
+			case ruleTypeUint:
 				val, err := strconv.ParseUint(tokens[0].Value, 10, 0)
 				if err != nil {
 					return nil, fmt.Errorf("value `%s` is an invalid uint", tokens[0].Value)
@@ -99,16 +98,16 @@ func (p FilterParser) ParseURL(u *url.URL) (*Filter, error) {
 				fm.AddUint(p.keys[i], []uint{uint(val)}, ComparasionEquals)
 
 			default:
-				panic(fmt.Sprintf("unexpected pkg.RuleType: %#v", p.types[i]))
+				return nil, fmt.Errorf("unexpected pkg.RuleType: %#v", p.types[i])
 			}
 			continue
 		}
 
 		lastState := tokens[0].Type
-		comparasion := tokens[0].ComparasionType()
+		comparasion := tokens[0].comparasionType()
 		valsIdx := []int{}
 
-		if lastState != TokenIdentifier {
+		if lastState != tokenIdentifier {
 			return nil, fmt.Errorf("expected comparator, found `%s`", tokens[0].Value)
 		}
 
@@ -116,41 +115,39 @@ func (p FilterParser) ParseURL(u *url.URL) (*Filter, error) {
 			return nil, fmt.Errorf("expected valid comparator, got `%s`", tokens[0].Value)
 		}
 
-		tokens = append(tokens, Token{Type: TokenEnd, Value: ""})
+		tokens = append(tokens, token{Type: tokenEnd, Value: ""})
 		for j := 1; j < len(tokens); j++ {
 			switch tokens[j].Type {
-			case TokenMark:
-				if lastState != TokenIdentifier {
+			case tokenMark:
+				if lastState != tokenIdentifier {
 					return nil, fmt.Errorf("expected comparator, got `%s`", tokens[j-1].Value)
 				}
-			case TokenComma:
-				if lastState != TokenValue {
+			case tokenComma:
+				if lastState != tokenValue {
 					return nil, fmt.Errorf("expected value, got `%s`", tokens[j-1].Value)
-				} else if comparasion != ComparasionIs {
-					return nil, fmt.Errorf("comma is only supported on `has` comparator")
+				} else if comparasion != ComparasionEquals {
+					return nil, fmt.Errorf("comma is only supported on `eq` comparator")
 				}
 
-			case TokenIdentifier:
-				if lastState != TokenBar {
+			case tokenIdentifier:
+				if lastState != tokenBar {
 					return nil, fmt.Errorf("expected `!`, got `%s`", tokens[j].Value)
 				}
 
-				comparasion = tokens[j].ComparasionType()
-			case TokenValue:
-				if lastState != TokenMark && lastState != TokenComma {
+				comparasion = tokens[j].comparasionType()
+			case tokenValue:
+				if lastState != tokenMark && lastState != tokenComma {
 					return nil, fmt.Errorf("expected `|` or comma, got `%s`", tokens[j].Value)
 				}
 
 				valsIdx = append(valsIdx, j)
-			case TokenBar, TokenEnd:
-				if lastState != TokenValue {
+			case tokenBar, tokenEnd:
+				if lastState != tokenValue {
 					return nil, fmt.Errorf("expected ``, got `%s`", tokens[j].Value)
 				}
 
-				fmt.Println("TEST")
-
 				switch p.types[i] {
-				case RuleTypeFloat:
+				case ruleTypeFloat:
 					floats := make([]float64, len(valsIdx))
 					for k := range valsIdx {
 						val, err := strconv.ParseFloat(tokens[valsIdx[k]].Value, 64)
@@ -162,7 +159,7 @@ func (p FilterParser) ParseURL(u *url.URL) (*Filter, error) {
 					}
 
 					fm.AddFloat(p.keys[i], floats, comparasion)
-				case RuleTypeInt:
+				case ruleTypeInt:
 					ints := make([]int, len(valsIdx))
 					for k := range valsIdx {
 						val, err := strconv.ParseInt(tokens[valsIdx[k]].Value, 10, 0)
@@ -174,26 +171,26 @@ func (p FilterParser) ParseURL(u *url.URL) (*Filter, error) {
 					}
 
 					fm.AddInt(p.keys[i], ints, comparasion)
-				case RuleTypeString:
+				case ruleTypeString:
 					strings := make([]string, len(valsIdx))
 					for k := range valsIdx {
 						strings[k] = tokens[valsIdx[k]].Value
 					}
 
 					fm.AddString(p.keys[i], strings, comparasion)
-				case RuleTypeTime:
+				case ruleTypeTime:
 					times := make([]time.Time, len(valsIdx))
 					for k := range valsIdx {
-						t, err := time.Parse(time.RFC3339, tokens[valsIdx[k]].Value)
+						t, err := time.Parse(p.TimeFormat, tokens[valsIdx[k]].Value)
 						if err != nil {
-							return nil, fmt.Errorf("value `%s` is an invalid RFC3339 time", tokens[valsIdx[k]].Value)
+							return nil, fmt.Errorf("value `%s` is not a time formatted as `%s`", tokens[valsIdx[k]].Value, p.TimeFormat)
 						}
 
 						times[k] = t
 					}
 
 					fm.AddTime(p.keys[i], times, comparasion)
-				case RuleTypeUint:
+				case ruleTypeUint:
 					uints := make([]uint, len(valsIdx))
 					for k := range valsIdx {
 						val, err := strconv.ParseUint(tokens[valsIdx[k]].Value, 10, 0)
@@ -206,7 +203,7 @@ func (p FilterParser) ParseURL(u *url.URL) (*Filter, error) {
 
 					fm.AddUint(p.keys[i], uints, comparasion)
 				default:
-					panic(fmt.Sprintf("unexpected pkg.RuleType: %#v", p.types[i]))
+					return nil, fmt.Errorf("unexpected pkg.RuleType: %#v", p.types[i])
 				}
 
 				// Resize to 0
@@ -222,7 +219,7 @@ func (p FilterParser) ParseURL(u *url.URL) (*Filter, error) {
 // Tokenize a string using a sliding window to work on that slice as it expands
 // until it matches one of the identifier/symbols or as a value when it ends on
 // either `,` or `|`, unless if either is escaped with `\`.
-func (p FilterParser) tokenize(str string) (tokens []Token) {
+func (p Parser) tokenize(str string) (tokens []token) {
 	var slice string
 	il, ih := 0, 1
 	afterMark := false
@@ -232,11 +229,11 @@ func (p FilterParser) tokenize(str string) (tokens []Token) {
 		switch slice {
 		case "!":
 			afterMark = true
-			tokens = append(tokens, Token{Type: TokenMark, Value: "!"})
+			tokens = append(tokens, token{Type: tokenMark, Value: "!"})
 			il = ih
-		case "lt", "gt", "le", "ge", "like", "is":
+		case "lt", "gt", "le", "ge", "lk", "eq":
 			if !afterMark {
-				tokens = append(tokens, Token{Type: TokenIdentifier, Value: slice})
+				tokens = append(tokens, token{Type: tokenIdentifier, Value: slice})
 				il = ih
 			}
 		default:
@@ -249,16 +246,16 @@ func (p FilterParser) tokenize(str string) (tokens []Token) {
 					afterMark = false
 					if len(slice) > 1 {
 						slice = slice[:last]
-						tokens = append(tokens, Token{Type: TokenValue, Value: slice})
+						tokens = append(tokens, token{Type: tokenValue, Value: slice})
 					}
-					tokens = append(tokens, Token{Type: TokenBar, Value: "|"})
+					tokens = append(tokens, token{Type: tokenBar, Value: "|"})
 					il = ih
 				case ',':
 					if len(slice) > 1 {
 						slice = slice[:last]
-						tokens = append(tokens, Token{Type: TokenValue, Value: slice})
+						tokens = append(tokens, token{Type: tokenValue, Value: slice})
 					}
-					tokens = append(tokens, Token{Type: TokenComma, Value: ","})
+					tokens = append(tokens, token{Type: tokenComma, Value: ","})
 
 					il = ih
 				}
@@ -275,23 +272,24 @@ func (p FilterParser) tokenize(str string) (tokens []Token) {
 	}
 
 	if len(slice) > 0 {
-		tokens = append(tokens, Token{Type: TokenValue, Value: slice})
+		tokens = append(tokens, token{Type: tokenValue, Value: slice})
 	}
 
+	// Do another pass to remove the escaped symbol
 	for i := range tokens {
-		tokens[i].RemoveBackslash()
+		tokens[i].removeBackslash()
 	}
 
 	return tokens
 }
 
-type Token struct {
-	Type  TokenType
+type token struct {
+	Type  tokenType
 	Value string
 }
 
 // RemoveBackslash removes escape character `\`, except when its escaping itself.
-func (t *Token) RemoveBackslash() {
+func (t *token) removeBackslash() {
 	removeStack := []int{}
 	for j := range t.Value {
 		if t.Value[j] == '\\' {
@@ -310,7 +308,7 @@ func (t *Token) RemoveBackslash() {
 	}
 }
 
-func (t Token) ComparasionType() ComparasionType {
+func (t token) comparasionType() ComparasionType {
 	switch t.Value {
 	case "eq":
 		return ComparasionEquals
@@ -322,31 +320,20 @@ func (t Token) ComparasionType() ComparasionType {
 		return ComparasionMoreThan
 	case "lt":
 		return ComparasionLessThan
-	case "like":
+	case "lk":
 		return ComparasionLike
-	case "is":
-		return ComparasionIs
 	}
 
 	return ComparasionInvalid
 }
 
-type TokenType uint
+type tokenType uint
 
 const (
-	TokenMark = iota + 1
-	TokenBar
-	TokenComma
-	TokenIdentifier
-	TokenValue
-	TokenEnd
+	tokenMark = iota + 1
+	tokenBar
+	tokenComma
+	tokenIdentifier
+	tokenValue
+	tokenEnd
 )
-
-func generateSequence(start, end int) []int {
-	indices := make([]int, end-start)
-	for i := 0; i < end-start; i++ {
-		indices[i] = start + i
-	}
-
-	return indices
-}

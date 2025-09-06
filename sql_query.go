@@ -52,7 +52,7 @@ func (sq *SQLBuilder) Build() (string, []any, error) {
 				}
 
 				conditions = append(conditions, expr)
-				parameters = append(parameters, params)
+				parameters = append(parameters, params...)
 				offset += uint(len(params))
 			}
 		}

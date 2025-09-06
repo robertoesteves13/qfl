@@ -34,5 +34,5 @@ func ExampleSQLBuilder() {
 	fmt.Println(params)
 	// Output:
 	// WHERE name LIKE $1 AND age > $2 AND salary <= $3 AND role IN ($4,$5)
-	// [[Roberto%] [23] [3000] [Programmer Developer]]
+	// [Roberto% 23 3000 Programmer Developer]
 }

@@ -2,6 +2,7 @@ package qfl
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -13,105 +14,187 @@ const (
 )
 
 // SQLBuilder is a generic WHERE-condition builder capable to convert filter
-// rules automatically
+// rules automatically.
+//
+// All the functions build the string on the builder in place, and it doesn't
+// check nor support if you call them in the wrong order. Use with caution
 type SQLBuilder struct {
+	// string builder for the SQL query
+	Builder strings.Builder
+
 	Filter            Filter
 	Keys              map[string]string
 	PlaceholderFormat SQLPlaceholderFormat
 }
 
-func (sq *SQLBuilder) Build() (string, []any, error) {
-	if sq.Keys == nil {
-		return "", nil, fmt.Errorf("field `Keys` is empty")
+func (sq *SQLBuilder) Select(table string, columns ...string) {
+	sq.Builder.WriteString("SELECT ")
+
+	for i := range columns {
+		sq.Builder.WriteString(columns[i])
+
+		if i == len(columns)-1 {
+			sq.Builder.WriteRune(' ')
+		} else {
+			sq.Builder.WriteString(", ")
+		}
 	}
 
-	conditions := []string{}
+	sq.Builder.WriteString("FROM ")
+	sq.Builder.WriteString(table)
+	sq.Builder.WriteRune('\n')
+}
+
+func (sq *SQLBuilder) Where() ([]any, error) {
+	if sq.Keys == nil {
+		return nil, fmt.Errorf("field `Keys` is empty")
+	}
+
 	parameters := []any{}
 	offset := uint(0)
 
+	sq.Builder.WriteString("WHERE ")
 	for i := range sq.Filter.keys {
 		key := sq.Filter.keys[i]
 		if column, ok := sq.Keys[key.key]; ok {
 			for i := range key.rules {
 				var (
-					expr   string
 					params []any
 				)
 
 				switch key.Type {
 				case ruleTypeInt:
-					expr, params = extractConditions(column, key.rules[i], sq.Filter.intVals, offset, sq.PlaceholderFormat)
+					params = extractConditions(column, key.rules[i], sq.Filter.intVals, offset, sq.PlaceholderFormat, &sq.Builder)
 				case ruleTypeUint:
-					expr, params = extractConditions(column, key.rules[i], sq.Filter.uintVals, offset, sq.PlaceholderFormat)
+					params = extractConditions(column, key.rules[i], sq.Filter.uintVals, offset, sq.PlaceholderFormat, &sq.Builder)
 				case ruleTypeFloat:
-					expr, params = extractConditions(column, key.rules[i], sq.Filter.floatVals, offset, sq.PlaceholderFormat)
+					params = extractConditions(column, key.rules[i], sq.Filter.floatVals, offset, sq.PlaceholderFormat, &sq.Builder)
 				case ruleTypeString:
-					expr, params = extractConditions(column, key.rules[i], sq.Filter.stringVals, offset, sq.PlaceholderFormat)
+					params = extractConditions(column, key.rules[i], sq.Filter.stringVals, offset, sq.PlaceholderFormat, &sq.Builder)
 				case ruleTypeTime:
-					expr, params = extractConditions(column, key.rules[i], sq.Filter.timeVals, offset, sq.PlaceholderFormat)
+					params = extractConditions(column, key.rules[i], sq.Filter.timeVals, offset, sq.PlaceholderFormat, &sq.Builder)
 				}
 
-				conditions = append(conditions, expr)
 				parameters = append(parameters, params...)
 				offset += uint(len(params))
+
+				if i != len(key.rules)-1 {
+					sq.Builder.WriteString(" AND ")
+				}
 			}
+		}
+
+		if i != len(sq.Filter.keys)-1 {
+			sq.Builder.WriteString(" AND ")
 		}
 	}
 
-	return "WHERE " + strings.Join(conditions, " AND "), parameters, nil
+	sq.Builder.WriteRune('\n')
+	return parameters, nil
 }
 
-func extractConditions[T Primitive](column string, rule filterRule, values []T, offset uint, format SQLPlaceholderFormat) (expression string, params []any) {
+func (sq *SQLBuilder) Join(table, condition string) {
+	sq.Builder.WriteString("JOIN ")
+	sq.Builder.WriteString(table)
+	sq.Builder.WriteString(" ON ")
+	sq.Builder.WriteString(condition)
+	sq.Builder.WriteRune('\n')
+}
+
+// Page paginates the query by the limit number. Pages are zero-indexed
+func (sq *SQLBuilder) Page(limit, page uint64) {
+	sq.Builder.WriteString("LIMIT ")
+	sq.Builder.Write(strconv.AppendUint(nil, limit, 10))
+	sq.Builder.WriteString(" OFFSET ")
+	sq.Builder.Write(strconv.AppendUint(nil, page*limit, 10))
+	sq.Builder.WriteRune('\n')
+}
+
+func (sq *SQLBuilder) Order(order string, columns ...string) {
+	sq.Builder.WriteString("ORDER BY ")
+
+	for i := range columns {
+		sq.Builder.WriteString(columns[i])
+
+		if i == len(columns)-1 {
+			sq.Builder.WriteRune(' ')
+		} else {
+			sq.Builder.WriteString(", ")
+		}
+	}
+
+	sq.Builder.WriteString(order)
+	sq.Builder.WriteRune('\n')
+}
+
+func (sq *SQLBuilder) With(name string, statement string) {
+	sq.Builder.WriteString("WITH ")
+	sq.Builder.WriteString(name)
+	sq.Builder.WriteString(" AS ( ")
+	sq.Builder.WriteString(statement)
+	sq.Builder.WriteRune(')')
+	sq.Builder.WriteRune('\n')
+}
+
+func extractConditions[T Primitive](column string, rule filterRule, values []T, offset uint, format SQLPlaceholderFormat, builder *strings.Builder) (params []any) {
 	params = make([]any, len(rule.indices))
 	for i := range rule.indices {
 		params[i] = values[rule.indices[i]]
 	}
 
-	skipPlaceholder := true
+	skipPlaceholder := false
 
+	builder.WriteString(column)
 	switch rule.Comparasion {
 	case ComparasionEquals:
 		if len(params) > 1 {
-			expression = column + " IN " + stringifyListParams(params, offset, format)
+			builder.WriteString(" IN ")
+			stringifyListParams(params, offset, format, builder)
+			skipPlaceholder = true
 		} else {
-			expression = fmt.Sprintf("%s = $%d", column, 1+offset)
+			builder.WriteString(" = ")
 		}
 
-		skipPlaceholder = false
 	case ComparasionLessThan:
-		expression = fmt.Sprintf("%s < ", column)
+		builder.WriteString(" < ")
 	case ComparasionMoreThan:
-		expression = fmt.Sprintf("%s > ", column)
+		builder.WriteString(" > ")
 	case ComparasionLessOrEqual:
-		expression = fmt.Sprintf("%s <= ", column)
+		builder.WriteString(" <= ")
 	case ComparasionMoreOrEqual:
-		expression = fmt.Sprintf("%s >= ", column)
+		builder.WriteString(" >= ")
 	case ComparasionLike:
-		expression = fmt.Sprintf("%s LIKE ", column)
+		builder.WriteString(" LIKE ")
 		for i := range params {
-			params[i] = fmt.Sprint(params[rule.indices[i]]) + "%"
+			params[i] = fmt.Sprint(params[rule.indices[i]])
 		}
 	}
 
-	if skipPlaceholder && format == SQLPlaceholderDollarSign {
-		expression += fmt.Sprintf("$%d", 1+offset)
-	} else if skipPlaceholder {
-		expression += "?"
+	if !skipPlaceholder && format == SQLPlaceholderDollarSign {
+		builder.WriteRune('$')
+		builder.Write(strconv.AppendInt(nil, int64(1+offset), 10))
+	} else if !skipPlaceholder {
+		builder.WriteRune('?')
 	}
 
 	return
 }
 
-// PERF: Benchmark this
-func stringifyListParams(params []any, offset uint, format SQLPlaceholderFormat) string {
-	strs := make([]string, len(params))
-	for i := range strs {
+func stringifyListParams(params []any, offset uint, format SQLPlaceholderFormat, builder *strings.Builder) {
+	builder.WriteRune('(')
+
+	for i := range params {
 		if format == SQLPlaceholderDollarSign {
-			strs[i] = fmt.Sprintf("$%d", uint(i+1)+offset)
+			builder.WriteRune('$')
+			builder.Write(strconv.AppendInt(nil, int64(1+offset)+int64(i), 10))
 		} else {
-			strs[i] = "?"
+			builder.WriteRune('?')
+		}
+
+		if i != len(params)-1 {
+			builder.WriteRune(',')
 		}
 	}
 
-	return "(" + strings.Join(strs, ",") + ")"
+	builder.WriteRune(')')
 }

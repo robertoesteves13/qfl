@@ -3,7 +3,7 @@
 
 This repository contains a parser for the QFL language that transforms into
 a filter data structure that stores a collection of rules for a given record,
-which the user can apply filters for searching for any database.
+and a SQL Query builder that can convert these rules into WHERE statements.
 
 # Library
 Checkout [documentation](https://pkg.go.dev/github.com/robertoesteves13/qfl) for examples on how to use the library.
@@ -55,5 +55,7 @@ time implementing something that won't be accepted.
 
 This library should be considered stable, so there shouldn't be any breaking
 changes. If however there is a feature that most users would benefit to, a
-new version of the module might be made for it.
+new version of the module might be made for it. Any breaking changes will be
+marked as a new major version of the library. You can also just copy the source
+code into your project since it's in public domain.
 
